@@ -436,6 +436,7 @@ atom reload
 atom rem
 atom reset
 atom restart
+atom restricted
 atom return_from
 atom return_to
 atom return_trace
