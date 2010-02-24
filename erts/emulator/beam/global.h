@@ -748,6 +748,9 @@ do {									\
 /* Port uses port specific locking (opposed to driver specific locking) */
 #define ERTS_PORT_SFLG_PORT_SPECIFIC_LOCK ((Uint32) (1 << 13))
 #define ERTS_PORT_SFLG_INVALID		((Uint32) (1 << 14))
+/* Port only takes messages from connected process */
+#define ERTS_PORT_SFLG_RESTRICTED       ((Uint32) (1 << 15))
+
 #ifdef DEBUG
 /* Only debug: make sure all flags aren't cleared unintentionally */
 #define ERTS_PORT_SFLG_PORT_DEBUG	((Uint32) (1 << 31))

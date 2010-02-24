@@ -615,6 +615,7 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_nump)
     int soft_eof;
     Sint linebuf;
     byte dir[MAXPATHLEN];
+    int restricted;
 
     /* These are the defaults */
     opts.packet_bytes = 0;
@@ -631,6 +632,7 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_nump)
     binary_io = 0;
     soft_eof = 0;
     linebuf = 0;
+    restricted = 0;
 
     *err_nump = 0;
 
@@ -756,6 +758,8 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_nump)
 		opts.exit_status = 1;
 	    } else if (*nargs == am_overlapped_io) {
 		opts.overlapped_io = 1;
+            } else if (*nargs == am_restricted) {
+                restricted = 1;
 	    } else {
 		goto badarg;
 	    }
@@ -935,6 +939,10 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_nump)
 	erts_port[port_num].linebuf = allocate_linebuf(linebuf); 
 	erts_port_status_bor_set(&erts_port[port_num],
 				 ERTS_PORT_SFLG_LINEBUF_IO);
+    }
+    if (restricted) {
+        erts_port_status_bor_set(&erts_port[port_num],
+                                 ERTS_PORT_SFLG_RESTRICTED);
     }
  
  do_return:
