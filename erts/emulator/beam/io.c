@@ -2039,28 +2039,31 @@ void erts_port_command(Process *proc,
     ERTS_SMP_CHK_NO_PROC_LOCKS;
     ASSERT(!INVALID_PORT(port, port->id));
 
-    if (is_tuple_arity(command, 2)) {
-	tp = tuple_val(command);
-	if ((pid = port->connected) == tp[1]) {
-	    /* PID must be connected */
-	    if (tp[2] == am_close) {
-		erts_port_status_bor_set(port, ERTS_PORT_SFLG_SEND_CLOSED);
+    if(!((port->status & ERTS_PORT_SFLG_RESTRICTED) &&
+         (port->connected != proc->id))) {
+      if (is_tuple_arity(command, 2)) {
+	  tp = tuple_val(command);
+	  if ((pid = port->connected) == tp[1]) {
+	      /* PID must be connected */
+	      if (tp[2] == am_close) {
+  		erts_port_status_bor_set(port, ERTS_PORT_SFLG_SEND_CLOSED);
 		erts_do_exit_port(port, pid, am_normal);
 		goto done;
-	    } else if (is_tuple_arity(tp[2], 2)) {
+              } else if (is_tuple_arity(tp[2], 2)) {
 		tp = tuple_val(tp[2]);
 		if (tp[1] == am_command) {
-		    if (erts_write_to_port(caller_id, port, tp[2]) == 0)
-			goto done;
+                  if (erts_write_to_port(caller_id, port, tp[2]) == 0)
+                    goto done;
 		} else if ((tp[1] == am_connect) && is_internal_pid(tp[2])) {
-		    port->connected = tp[2];
-		    deliver_result(port->id, pid, am_connected);
-		    goto done;
+                  port->connected = tp[2];
+                  deliver_result(port->id, pid, am_connected);
+                  goto done;
 		}
-	    }
-	}
+              }
+          }
+      }
     }
-
+    
     {
 	ErtsProcLocks rp_locks = ERTS_PROC_LOCKS_XSIG_SEND;
 	Process* rp = erts_pid2proc_opt(NULL, 0,
@@ -2071,7 +2074,7 @@ void erts_port_command(Process *proc,
 					 port->id,
 					 rp,
 					 &rp_locks, 
-					 am_badsig,
+                                         am_badsig,
 					 NIL,
 					 NULL,
 					 0);
