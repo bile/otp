@@ -139,8 +139,10 @@
 					/* No matching try clause */
 #define EXC_NOTSUP		((17 << 8) | EXC_ERROR)
 					/* Not supported */
+#define EXC_RESTRICTED          ((18 << 8) | EXC_ERROR)
+                                        /* Port restricted */
 
-#define NUMBER_EXIT_CODES 18	/* The number of exit code indices */
+#define NUMBER_EXIT_CODES 19	/* The number of exit code indices */
 
 /*
  * Internal pseudo-error codes.

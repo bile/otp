@@ -4978,7 +4978,8 @@ Eterm error_atom[NUMBER_EXIT_CODES] = {
   am_notalive,		/* 14 */
   am_system_limit,	/* 15 */
   am_try_clause,	/* 16 */
-  am_notsup		/* 17 */
+  am_notsup,		/* 17 */
+  am_restricted         /* 18 */
 };
 
 /*

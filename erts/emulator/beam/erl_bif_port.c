@@ -106,6 +106,12 @@ BIF_RETTYPE open_port_2(BIF_ALIST_2)
               when port(Port), pid(Pid)
 
  ***************************************************************************/
+static int
+is_restricted(Process *proc, Port *port)
+{
+  return ((port->status & ERTS_PORT_SFLG_RESTRICTED) &&
+          (port->connected != proc->id));
+}
 
 static Port*
 id_or_name2port(Process *c_p, Eterm id)
@@ -149,7 +155,7 @@ static BIF_RETTYPE do_port_command(Process *BIF_P,
     	}
 	BIF_ERROR(BIF_P, BADARG);
     }
-    
+
     /* Trace port in, id_or_name2port causes wait */
 
     if (IS_TRACED_FL(p, F_TRACE_SCHED_PORTS)) {
@@ -161,7 +167,10 @@ static BIF_RETTYPE do_port_command(Process *BIF_P,
 
     ERTS_BIF_PREP_RET(res, am_true);
 
-    if ((flags & ERTS_PORT_COMMAND_FLAG_FORCE)
+    if(is_restricted(BIF_P, p)) {
+        ERTS_BIF_PREP_ERROR(res, BIF_P, EXC_RESTRICTED);
+    }
+    else if ((flags & ERTS_PORT_COMMAND_FLAG_FORCE)
 	&& !(p->drv_ptr->flags & ERL_DRV_FLAG_SOFT_BUSY)) {
 	ERTS_BIF_PREP_ERROR(res, BIF_P, EXC_NOTSUP);
     }
@@ -264,6 +273,7 @@ BIF_RETTYPE port_call_3(BIF_ALIST_3)
     Eterm *hp_end;              /* To satisfy hybrid heap architecture */
     unsigned ret_flags = 0U;
     int fpe_was_unmasked;
+    int error = BADARG;
 
     bytes = &port_input[0];
     port_resp = port_result;
@@ -305,9 +315,13 @@ BIF_RETTYPE port_call_3(BIF_ALIST_3)
 #else
 	ERTS_BIF_CHK_EXITED(BIF_P);
 #endif
-	BIF_ERROR(BIF_P, BADARG);
+	BIF_ERROR(BIF_P, error);
     }
 
+    if (is_restricted(BIF_P, p)) {
+        error = EXC_RESTRICTED;
+        goto error;
+    }
     if ((drv = p->drv_ptr) == NULL) {
 	goto error;
     }
@@ -455,9 +469,16 @@ BIF_RETTYPE port_control_3(BIF_ALIST_3)
     	profile_runnable_port(p, am_active);
     }
 
-    if (term_to_Uint(BIF_ARG_2, &op))
-	res = erts_port_control(BIF_P, p, op, BIF_ARG_3);
-    
+    if (is_restricted(BIF_P, p)) {
+        ERTS_BIF_PREP_ERROR(res, BIF_P, EXC_RESTRICTED);
+    }
+    else if (term_to_Uint(BIF_ARG_2, &op)) {
+        res = erts_port_control(BIF_P, p, op, BIF_ARG_3);
+        if (is_non_value(res)) {
+            ERTS_BIF_PREP_ERROR(res, BIF_P, BADARG);
+        }
+    }
+
     /* Trace the port for scheduling out */
     if (IS_TRACED_FL(p, F_TRACE_SCHED_PORTS)) {
     	trace_sched_ports_where(p, am_out, am_control);
@@ -482,28 +503,31 @@ BIF_RETTYPE port_control_3(BIF_ALIST_3)
     	profile_runnable_proc(BIF_P, am_active);
     }
     
-    if (is_non_value(res)) {
-	BIF_ERROR(BIF_P, BADARG);
-    }
     BIF_RET(res);
 }
 
 BIF_RETTYPE port_close_1(BIF_ALIST_1)
 {
     Port* p;
+    BIF_RETTYPE res = am_true;
+
     erts_smp_proc_unlock(BIF_P, ERTS_PROC_LOCK_MAIN);
     p = id_or_name2port(NULL, BIF_ARG_1);
     if (!p) {
 	erts_smp_proc_lock(BIF_P, ERTS_PROC_LOCK_MAIN);
 	BIF_ERROR(BIF_P, BADARG);
     }
-    erts_do_exit_port(p, p->connected, am_normal);
+
+    if(is_restricted(BIF_P, p))
+        ERTS_BIF_PREP_ERROR(res, BIF_P, EXC_RESTRICTED);
+    else
+        erts_do_exit_port(p, p->connected, am_normal);
     /* if !ERTS_SMP: since we terminate port with reason normal 
        we SHOULD never get an exit signal ourselves
        */
     erts_port_release(p);
     erts_smp_proc_lock(BIF_P, ERTS_PROC_LOCK_MAIN);
-    BIF_RET(am_true);
+    BIF_RET(res);
 }
 
 BIF_RETTYPE port_connect_2(BIF_ALIST_2)
@@ -511,6 +535,7 @@ BIF_RETTYPE port_connect_2(BIF_ALIST_2)
     Port* prt;
     Process* rp;
     Eterm pid = BIF_ARG_2;
+    BIF_RETTYPE res = am_true;
 
     if (is_not_internal_pid(pid)) {
     error:
@@ -529,14 +554,19 @@ BIF_RETTYPE port_connect_2(BIF_ALIST_2)
 	goto error;
     }
 
-    erts_add_link(&(rp->nlinks), LINK_PID, prt->id);
-    erts_add_link(&(prt->nlinks), LINK_PID, pid);
+    if (is_restricted(rp, prt)) {
+        ERTS_BIF_PREP_ERROR(res, rp, EXC_RESTRICTED);
+    }
+    else {
+        erts_add_link(&(rp->nlinks), LINK_PID, prt->id);
+        erts_add_link(&(prt->nlinks), LINK_PID, pid);
+        prt->connected = pid; /* internal pid */
+    }
 
     erts_smp_proc_unlock(rp, ERTS_PROC_LOCK_LINK);
 
-    prt->connected = pid; /* internal pid */
     erts_smp_port_unlock(prt);
-    BIF_RET(am_true);
+    BIF_RET(res);
 }
 
 BIF_RETTYPE port_set_data_2(BIF_ALIST_2)
@@ -544,29 +574,36 @@ BIF_RETTYPE port_set_data_2(BIF_ALIST_2)
     Port* prt;
     Eterm portid = BIF_ARG_1;
     Eterm data   = BIF_ARG_2;
+    BIF_RETTYPE res = am_true;
 
     prt = id_or_name2port(BIF_P, portid);
     if (!prt) {
 	BIF_ERROR(BIF_P, BADARG);
     }
-    if (prt->bp != NULL) {
-	free_message_buffer(prt->bp);
-	prt->bp = NULL;
-    }
-    if (IS_CONST(data)) {
-	prt->data = data;
-    } else {
-	Uint size;
-	ErlHeapFragment* bp;
-	Eterm* hp;
 
-	size = size_object(data);
-	prt->bp = bp = new_message_buffer(size);
-	hp = bp->mem;
-	prt->data = copy_struct(data, size, &hp, &bp->off_heap);
+    if(is_restricted(BIF_P, prt)) {
+      ERTS_BIF_PREP_ERROR(res, BIF_P, EXC_RESTRICTED);
+    }
+    else {
+      if (prt->bp != NULL) {
+	  free_message_buffer(prt->bp);
+          prt->bp = NULL;
+      }
+      if (IS_CONST(data)) {
+	  prt->data = data;
+      } else {
+	  Uint size;
+          ErlHeapFragment* bp;
+          Eterm* hp;
+
+          size = size_object(data);
+          prt->bp = bp = new_message_buffer(size);
+          hp = bp->mem;
+          prt->data = copy_struct(data, size, &hp, &bp->off_heap);
+      }
     }
     erts_smp_port_unlock(prt);
-    BIF_RET(am_true);
+    BIF_RET(res);
 }
 
 
@@ -580,11 +617,16 @@ BIF_RETTYPE port_get_data_1(BIF_ALIST_1)
     if (!prt) {
 	BIF_ERROR(BIF_P, BADARG);
     }
-    if (prt->bp == NULL) {	/* MUST be CONST! */
-	res = prt->data;
-    } else {
-	Eterm* hp = HAlloc(BIF_P, prt->bp->size);
-	res = copy_struct(prt->data, prt->bp->size, &hp, &MSO(BIF_P));
+    if(is_restricted(BIF_P, prt)) {
+        ERTS_BIF_PREP_ERROR(res, BIF_P, EXC_RESTRICTED);
+    }
+    else {
+        if (prt->bp == NULL) {	/* MUST be CONST! */
+            res = prt->data;
+        } else {
+            Eterm* hp = HAlloc(BIF_P, prt->bp->size);
+            res = copy_struct(prt->data, prt->bp->size, &hp, &MSO(BIF_P));
+        }
     }
     erts_smp_port_unlock(prt);
     BIF_RET(res);
