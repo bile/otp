@@ -88,7 +88,7 @@
 	 otp_3906/1, otp_4389/1, win_massive/1, win_massive_client/1,
 	 mix_up_ports/1, otp_5112/1, otp_5119/1, otp_6224/1,
 	 exit_status_multi_scheduling_block/1, ports/1,
-	 spawn_driver/1,spawn_executable/1]).
+	 spawn_driver/1,spawn_executable/1,restricted/1]).
 
 -export([]).
 
@@ -112,7 +112,7 @@ all(suite) ->
      otp_3906, otp_4389, win_massive, mix_up_ports,
      otp_5112, otp_5119,
      exit_status_multi_scheduling_block,
-     ports, spawn_driver, spawn_executable
+     ports, spawn_driver, spawn_executable, restricted
     ].
 
 -define(DEFAULT_TIMEOUT, ?t:minutes(5)).
@@ -298,6 +298,42 @@ bad_message(PortTest, Message) ->
 	{'EXIT',P,badsig} -> ok;
 	Other -> test_server:fail({unexpected_message, Other})
     end.
+
+%% Test restricted option
+restricted(Config) when is_list(Config) ->
+    ?line Dog = test_server:timetrap(test_server:seconds(30)),
+    ?line PortTest = port_test(Config),
+    ?line Self = self(),
+    ?line Pid = spawn(fun() -> process_flag(trap_exit,true), Self ! open_port({spawn, PortTest}, [restricted]), receive after 10000 -> ok end end),
+    ?line process_flag(trap_exit, true),
+    ?line receive Port -> ok end,
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_command(Port, "blah")),
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_command(Port, "blah", [force])),
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_close(Port)),
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_connect(Port, self())),
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_control(Port, 0, "blah")),
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_call(Port, 0, "blah")),
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_set_data(Port, "blah")),
+    ?line {'EXIT', {restricted, _}} = (catch erlang:port_get_data(Port)),
+    ?line register(port, Port),
+    ?line Port = whereis(port),
+    ?line Port ! {self(), close},
+    ?line receive after 100 -> ok end,
+    ?line Port = whereis(port),
+    ?line Port ! {self(), {command, "data"}},
+    ?line receive after 100 -> ok end,
+    ?line Port = whereis(port),
+    ?line Port ! {Pid, close},
+    ?line receive after 100 -> ok end,
+    ?line Port = whereis(port),
+    ?line Port ! {Pid, {command, "data"}},
+    ?line receive after 100 -> ok end,
+    ?line Port = whereis(port),
+    ?line exit(Pid,kill),
+    ?line receive after 100 -> ok end,
+    ?line undefined = whereis(port),
+    ?line test_server:timetrap_cancel(Dog),
+    ok.
 
 %% Tests various options (stream and {packet, Number} are implicitly
 %% tested in other test cases).
@@ -2178,7 +2214,6 @@ fun_spawn(Fun, Args) ->
 
 port_test(Config) when is_list(Config) ->
     ?line filename:join(?config(data_dir, Config), "port_test").
-
 
 ports(doc) -> "Test that erlang:ports/0 returns a consistent snapshot of ports";
 ports(suite) -> [];
