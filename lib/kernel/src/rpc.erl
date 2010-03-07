@@ -49,7 +49,8 @@
 	 nb_yield/2,
 	 nb_yield/1,
 	 parallel_eval/1,
-	 pmap/3, pinfo/1, pinfo/2]).
+	 pmap/3, pinfo/1, pinfo/2,
+         filter/0, filter/1]).
 
 %% Deprecated calls.
 -deprecated([{safe_multi_server_call,2},{safe_multi_server_call,3}]).
@@ -61,6 +62,9 @@
 
 %% Internals
 -export([proxy_user_flush/0]).
+
+%% Records
+-record(state, {callers, filter}).
 
 %%------------------------------------------------------------------------
 
@@ -78,18 +82,23 @@ stop() ->
 stop(Rpc) ->
     gen_server:call(Rpc, stop, infinity).
 
--spec init([]) -> {'ok', gb_tree()}.
+-spec init([]) -> {'ok', #state{callers :: gb_tree(), filter :: fun() | atom()}}.
 init([]) ->
     process_flag(trap_exit, true),
-    {ok, gb_trees:empty()}.
+    {ok, #state{callers = gb_trees:empty()}}.
+
+handle_call({filter, Filter}, _From, S) ->
+    {reply, S#state.filter, S#state{filter = Filter}};
+handle_call(filter, _From, S) ->
+    {reply, S#state.filter, S};
 
 handle_call({call, Mod, Fun, Args, Gleader}, To, S) ->
     handle_call_call(Mod, Fun, Args, Gleader, To, S);
-handle_call({block_call, Mod, Fun, Args, Gleader}, _To, S) ->
+handle_call({block_call, Mod, Fun, Args, Gleader}, To, S) ->
     MyGL = group_leader(),
     set_group_leader(Gleader),
     Reply = 
-	case catch apply(Mod,Fun,Args) of
+	case catch filtered_apply(Mod,Fun,Args,To,S) of
 	    {'EXIT', _} = Exit ->
 		{badrpc, Exit};
 	    Other ->
@@ -107,7 +116,7 @@ handle_cast({cast, Mod, Fun, Args, Gleader}, S) ->
 	    spawn(
 	      fun() ->
 		      set_group_leader(Gleader),
-		      apply(Mod, Fun, Args)
+		      filtered_apply(Mod, Fun, Args, cast, S)
 	      end),
 	    {noreply, S};
 handle_cast(_, S) ->
@@ -115,7 +124,7 @@ handle_cast(_, S) ->
 
 
 handle_info({'DOWN', _, process, Caller, Reason}, S) ->
-    case gb_trees:lookup(Caller, S) of
+    case gb_trees:lookup(Caller, S#state.callers) of
 	{value, To} ->
 	    receive
 		{Caller, {reply, Reply}} ->
@@ -123,17 +132,20 @@ handle_info({'DOWN', _, process, Caller, Reason}, S) ->
 	    after 0 ->
 		    gen_server:reply(To, {badrpc, {'EXIT', Reason}})
 	    end,
-	    {noreply, gb_trees:delete(Caller, S)};
+	    {noreply,
+             S#state{callers = gb_trees:delete(Caller, S#state.callers)}};
 	none ->
 	    {noreply, S}
     end;
 handle_info({Caller, {reply, Reply}}, S) ->
-    case gb_trees:lookup(Caller, S) of
+    case gb_trees:lookup(Caller, S#state.callers) of
 	{value, To} ->
 	    receive
 		{'DOWN', _, process, Caller, _} -> 
 		    gen_server:reply(To, Reply),
-		    {noreply, gb_trees:delete(Caller, S)}
+		    {noreply,
+                     S#state{callers =
+                             gb_trees:delete(Caller, S#state.callers)}}
 	    end;
 	none ->
 	    {noreply, S}
@@ -142,7 +154,7 @@ handle_info({From, {sbcast, Name, Msg}}, S) ->
     case catch Name ! Msg of  %% use catch to get the printout
 	{'EXIT', _} ->
 	    From ! {?NAME, node(), {nonexisting_name, Name}};
-	_ -> 
+	_ ->
 	    From ! {?NAME, node(), node()}
     end,
     {noreply,S};
@@ -179,7 +191,7 @@ handle_call_call(Mod, Fun, Args, Gleader, To, S) ->
 		  Reply = 
 		      %% in case some sucker rex'es 
 		      %% something that throws
-		      case catch apply(Mod, Fun, Args) of
+		      case catch filtered_apply(Mod, Fun, Args, To, S) of
 			  {'EXIT', _} = Exit ->
 			      {badrpc, Exit};
 			  Result ->
@@ -187,7 +199,8 @@ handle_call_call(Mod, Fun, Args, Gleader, To, S) ->
 		      end,
 		  RpcServer ! {self(), {reply, Reply}}
 	  end),
-    {noreply, gb_trees:insert(Caller, To, S)}.
+    {noreply,
+     S#state{callers = gb_trees:insert(Caller, To, S#state.callers)}}.
 
 
 %% RPC aid functions ....
@@ -307,6 +320,20 @@ rpc_check({'EXIT', {{nodedown,_},_}}) -> {badrpc, nodedown};
 rpc_check({'EXIT', X}) -> exit(X);
 rpc_check(X) -> X.
 
+%% Filter
+filtered_apply(M,F,A,_To,S)
+  when not is_function(S#state.filter) ->
+    apply(M,F,A);
+
+filtered_apply(M,F,A,To,S) ->
+    Filter = S#state.filter,
+    case catch Filter(M,F,A,To) of
+        true ->
+            apply(M,F,A);
+        _ ->
+            {'EXIT', {undef,[_|T]}} = (catch erlang:error(undef)),
+            erlang:raise(error,undef,[{M,F,A}]++T)
+    end.
 
 %% This is a real handy function to be used when interacting with
 %% a server called Name at node Node, It is assumed that the server
@@ -349,7 +376,7 @@ cast(Node, Mod, Fun, Args) ->
     true.
 
 
-%% Asynchronous broadcast, returns nothing, it's just send'n prey
+%% Asynchronous broadcast, returns nothing, it's just send'n pray
 -spec abcast(atom(), term()) -> 'abcast'.
 
 abcast(Name, Mess) ->
@@ -459,6 +486,15 @@ do_multicall(Nodes, M, F, A, Timeout) ->
 				      Timeout),
     {lists:map(fun({_,R}) -> R end, Rep), Bad}.
 
+-spec filter(fun() | atom()) -> fun() | atom().
+
+filter(Filter) ->
+    gen_server:call(?NAME, {filter, Filter}).
+
+-spec filter() -> fun() | atom().
+
+filter() ->
+    gen_server:call(?NAME, filter).
 
 %% Send Msg to Name on all nodes, and collect the answers.
 %% Return {Replies, Badnodes} where Badnodes is a list of the nodes

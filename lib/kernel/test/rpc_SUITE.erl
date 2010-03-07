@@ -22,7 +22,8 @@
 -export([call/1, block_call/1, multicall/1, multicall_timeout/1, 
 	 multicall_dies/1, multicall_node_dies/1,
 	 called_dies/1, called_node_dies/1, 
-	 called_throws/1, call_benchmark/1, async_call/1]).
+	 called_throws/1, call_benchmark/1, async_call/1,
+         filter/1]).
 
 -export([suicide/2, suicide/3, f/0, f2/0]).
 
@@ -489,6 +490,38 @@ async_call(Config) when is_list(Config) ->
     ?line {value,{hej,_,Node2}} = rpc:nb_yield(Promise2, infinity),
     ?line {hej,_,Node3} = rpc:yield(Promise3),
 
+    ?t:timetrap_cancel(Dog),
+    ok.
+
+filter(Config) when is_list(Config) ->
+    Dog = ?t:timetrap(?t:seconds(30)),
+    ?line PA = filename:dirname(code:which(?MODULE)),
+    ?line {ok, Node} = ?t:start_node('filter', slave,
+                                     [{args, "-pa " ++ PA}]),
+    ?line Fun = fun(M,_F,_A,_T) ->
+                        case M of
+                            rpc -> true;
+                            error -> erlang:error(undef);
+                            throw -> erlang:throw(undef);
+                            exit  -> erlang:exit(undef);
+                            _ -> false
+                        end end,
+    ?line Ver = os:version(),
+    ?line Ver = rpc:call(Node,os,version,[]),
+    ?line undefined = rpc:call(Node, rpc, filter,[Fun]),
+    ?line {badrpc,{'EXIT',_}} = rpc:call(Node,
+                                         os,version,[]),
+    ?line {badrpc,{'EXIT',_}} = rpc:call(Node,
+                                         error,foo,[]),
+    ?line {badrpc,{'EXIT',_}} = rpc:call(Node,
+                                         exit,foo,[]),
+    ?line {badrpc,{'EXIT',_}} = rpc:call(Node,
+                                         throw,foo,[]),
+    ?line Fun = rpc:call(Node,rpc,filter,[]),
+    ?line Fun = rpc:call(Node,rpc,filter,[undefined]),
+    ?line undefined = rpc:call(Node,rpc,filter,[]),
+    ?line Ver = rpc:call(Node,os,version,[]),
+    ?line ?t:stop_node(Node),
     ?t:timetrap_cancel(Dog),
     ok.
 
