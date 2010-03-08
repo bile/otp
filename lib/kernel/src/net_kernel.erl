@@ -60,7 +60,8 @@
 	 longnames/0,
 	 allow/1,
 	 protocol_childspecs/0,
-	 epmd_module/0]).
+	 epmd_module/0,
+         spawn_filter/0, spawn_filter/1]).
 
 -export([connect/1, disconnect/1, hidden_connect/1, passive_cnct/1]).
 -export([connect_node/1, hidden_connect_node/1]). %% explicit connect
@@ -74,7 +75,7 @@
 
 %% Internal Exports 
 -export([do_spawn/3,
-	 spawn_func/6,
+	 spawn_func/7,
 	 ticker/2,
 	 ticker_loop/2,
 	 aux_ticker/4]).
@@ -96,9 +97,10 @@
 	  conn_owners = [], %% List of connection owner pids,
 	  pend_owners = [], %% List of potential owners 
 	  listen,       %% list of  #listen
-	  allowed,       %% list of allowed nodes in a restricted system
-	  verbose = 0,   %% level of verboseness
-	  publish_on_nodes = undefined
+	  allowed,      %% list of allowed nodes in a restricted system
+	  verbose = 0,  %% level of verboseness
+	  publish_on_nodes = undefined,
+          spawn_filter
 	 }).
 
 -record(listen, {
@@ -144,6 +146,8 @@
 
 %% Interface functions
 
+spawn_filter() ->              request(spawn_filter).
+spawn_filter(Filter) ->        request({spawn_filter,Filter}).
 kernel_apply(M,F,A) ->         request({apply,M,F,A}).
 allow(Nodes) ->                request({allow, Nodes}).
 longnames() ->                 request(longnames).
@@ -500,7 +504,13 @@ handle_call({new_ticktime,T,TP}, _, #state{tick = #tick{ticker = Tckr,
 handle_call({new_ticktime,_,_},
 	    _,
 	    #state{tick = #tick_change{time = T}} = State) ->
-    {reply, {ongoing_change_to, T}, State}.
+    {reply, {ongoing_change_to, T}, State};
+
+handle_call(spawn_filter,_From,State) ->
+    {reply, State#state.spawn_filter, State};
+
+handle_call({spawn_filter,Filter},_From,State) ->
+    {reply, State#state.spawn_filter, State#state{spawn_filter = Filter}}.
 
 %% ------------------------------------------------------------
 %% handle_cast.
@@ -1063,7 +1073,8 @@ safesend(Pid, Mess) -> Pid ! Mess.
 -endif.
 
 do_spawn(SpawnFuncArgs, SpawnOpts, State) ->
-    case catch spawn_opt(?MODULE, spawn_func, SpawnFuncArgs, SpawnOpts) of
+    Filter = State#state.spawn_filter,
+    case catch spawn_opt(?MODULE, spawn_func, SpawnFuncArgs++[Filter], SpawnOpts) of
 	{'EXIT', {Reason,_}} ->    
 	    {reply, {'EXIT', {Reason,[]}}, State};
 	{'EXIT', Reason} ->    
@@ -1077,15 +1088,29 @@ do_spawn(SpawnFuncArgs, SpawnOpts, State) ->
 %% If the link message would not arrive, the runtime system shall
 %% generate a nodedown message
 
-spawn_func(link,{From,Tag},M,F,A,Gleader) ->
+spawn_func(link,{From,Tag},M,F,A,Gleader,Filter) ->
     link(From),
     gen_server:reply({From,Tag},self()),  %% ahhh
     group_leader(Gleader,self()),
-    apply(M,F,A);
-spawn_func(_,{From,Tag},M,F,A,Gleader) ->
+    filtered_apply(M,F,A,{From,Tag},Filter);
+spawn_func(_,{From,Tag},M,F,A,Gleader,Filter) ->
     gen_server:reply({From,Tag},self()),  %% ahhh
     group_leader(Gleader,self()),
-    apply(M,F,A).
+    filtered_apply(M,F,A,{From,Tag},Filter).
+
+%% Filter
+filtered_apply(M,F,A,_To,Filter)
+  when not is_function(Filter) ->
+    apply(M,F,A);
+
+filtered_apply(M,F,A,To,Filter) ->
+    case catch Filter(M,F,A,To) of
+        true ->
+            apply(M,F,A);
+        _ ->
+            {'EXIT', {undef,[_|T]}} = (catch erlang:error(undef)),
+            erlang:raise(error,undef,[{M,F,A}]++T)
+    end.
 
 %% -----------------------------------------------------------
 %% Set up connection to a new node.
