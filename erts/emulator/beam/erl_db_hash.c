@@ -381,7 +381,8 @@ static int db_next_hash(Process *p,
 			Eterm *ret);
 
 static int db_member_hash(DbTable *tbl, Eterm key, Eterm *ret);
-
+static int db_get_and_erase_hash(Process *p, DbTable *tbl,
+                                 Eterm key, Eterm *ret);
 static int db_get_element_hash(Process *p, DbTable *tbl, 
 			       Eterm key, int ndex, Eterm *ret);
 
@@ -506,6 +507,7 @@ DbTableMethod db_hash =
     db_next_hash,    /* prev == next   */
     db_put_hash,
     db_get_hash,
+    db_get_and_erase_hash,
     db_get_element_hash,
     db_member_hash,
     db_erase_hash,
@@ -894,6 +896,58 @@ int db_get_hash(Process *p, DbTable *tbl, Eterm key, Eterm *ret)
 done:
     RUNLOCK_HASH(lck);
     return DB_ERROR_NONE;
+}
+
+int db_get_and_erase_hash(Process *p, DbTable *tbl, Eterm key, Eterm *ret)
+{
+    DbTableHash *tb = &tbl->hash;
+    HashValue hval;
+    int ix;
+    HashDbTerm** bp;
+    HashDbTerm* b;
+    erts_smp_rwmtx_t* lck;
+    int nitems_diff = 0;
+    Eterm match_list = NIL;
+
+    hval = MAKE_HASH(key);
+    lck = WLOCK_HASH(tb,hval);
+    ix = hash_to_ix(tb, hval);
+    bp = &BUCKET(tb, ix);
+    b = *bp;
+
+    while(b != 0) {
+	if (has_live_key(tb,b,key,hval)) {
+            Eterm *hp = HAlloc(p,b->dbterm.size+2);
+            Eterm copy = db_copy_object_from_ets(&tb->common,&b->dbterm,&hp,&MSO(p));
+
+	    --nitems_diff;
+            match_list = CONS(hp,copy,match_list);
+	    if (nitems_diff == -1 && IS_FIXED(tb)) {
+		/* Pseudo remove (no need to keep several of same key) */
+		add_fixed_deletion(tb, ix);
+		b->hvalue = INVALID_HASH;
+	    } else {
+		*bp = b->next;
+		free_term(tb, b);
+		b = *bp;
+		continue;
+	    }
+	}
+	else {
+	    if (nitems_diff && b->hvalue != INVALID_HASH)
+		break;
+	}
+	bp = &b->next;
+	b = b->next;
+    }
+    WUNLOCK_HASH(lck);
+    if (nitems_diff) {
+	erts_smp_atomic_add_nob(&tb->common.nitems, nitems_diff);
+	try_shrink(tb);
+    }
+
+    *ret = match_list;
+    return DB_ERROR_NONE;  
 }
 
 int db_get_element_array(DbTable *tbl, 

@@ -360,6 +360,8 @@ static int db_prev_tree(Process *p, DbTable *tbl,
 static int db_put_tree(DbTable *tbl, Eterm obj, int key_clash_fail);
 static int db_get_tree(Process *p, DbTable *tbl, 
 		       Eterm key,  Eterm *ret);
+static int db_get_and_erase_tree(Process *p, DbTable *tbl, 
+                                Eterm key,  Eterm *ret);
 static int db_member_tree(DbTable *tbl, Eterm key, Eterm *ret);
 static int db_get_element_tree(Process *p, DbTable *tbl, 
 			       Eterm key,int ndex,
@@ -419,6 +421,7 @@ DbTableMethod db_tree =
     db_prev_tree,
     db_put_tree,
     db_get_tree,
+    db_get_and_erase_tree,
     db_get_element_tree,
     db_member_tree,
     db_erase_tree,
@@ -720,6 +723,34 @@ static int db_get_tree(Process *p, DbTable *tbl, Eterm key, Eterm *ret)
 	*ret = CONS(hp, copy, NIL);
 	hp += 2;
 	HRelease(p,hend,hp);
+    }
+    return DB_ERROR_NONE;
+}
+
+static int db_get_and_erase_tree(Process *p, DbTable *tbl, Eterm key, Eterm *ret)
+{
+    DbTableTree *tb = &tbl->tree;
+    Eterm copy;
+    Eterm *hp, *hend;
+    TreeDbTerm *this;
+
+    /*
+     * This is always a set, so we know exactly how large
+     * the data is when we have found it.
+     * The list created around it is purely for interface conformance.
+     */
+    
+    this = linkout_tree(tb,key,NULL);
+    if (this == NULL) {
+	*ret = NIL;
+    } else {
+	hp = HAlloc(p, this->dbterm.size + 2);
+	hend = hp + this->dbterm.size + 2;
+	copy = db_copy_object_from_ets(&tb->common, &this->dbterm, &hp, &MSO(p));
+	*ret = CONS(hp, copy, NIL);
+	hp += 2;
+	HRelease(p,hend,hp);
+        free_term(tb,this);
     }
     return DB_ERROR_NONE;
 }

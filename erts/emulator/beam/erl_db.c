@@ -1582,6 +1582,36 @@ BIF_RETTYPE ets_lookup_2(BIF_ALIST_2)
 }
 
 /* 
+** The lookup_and_delete BIF
+*/
+BIF_RETTYPE ets_lookup_and_delete_2(BIF_ALIST_2)
+{
+    DbTable* tb;
+    int cret;
+    Eterm ret;
+
+    CHECK_TABLES();
+
+    if ((tb = db_get_table(BIF_P, BIF_ARG_1, DB_WRITE, LCK_WRITE_REC)) == NULL) {
+	BIF_ERROR(BIF_P, BADARG);
+    }
+
+    cret = tb->common.meth->db_get_and_erase(BIF_P,tb,BIF_ARG_2,&ret);
+
+    db_unlock(tb, LCK_WRITE_REC);
+
+    switch (cret) {
+    case DB_ERROR_NONE:
+	BIF_RET(ret);
+    case DB_ERROR_SYSRES:
+	BIF_ERROR(BIF_P, SYSTEM_LIMIT);
+    default:
+	BIF_ERROR(BIF_P, BADARG);
+    }
+
+}
+
+/* 
 ** The lookup BIF 
 */
 BIF_RETTYPE ets_member_2(BIF_ALIST_2)

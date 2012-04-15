@@ -530,6 +530,8 @@ bif ets:is_compiled_ms/1
 bif 'erl.lang.ets':is_compiled_ms/1	ebif_ets_is_compiled_ms_1
 bif ets:lookup/2
 bif 'erl.lang.ets':lookup/2		ebif_ets_lookup_2
+bif ets:lookup_and_delete/2
+bif 'erl.lang.ets':lookup_and_delete/2	ebif_ets_lookup_and_delete_2
 bif ets:lookup_element/3
 bif 'erl.lang.ets':lookup_element/3	ebif_ets_lookup_element_3
 bif ets:info/1

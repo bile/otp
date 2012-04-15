@@ -116,6 +116,10 @@ typedef struct db_table_method
 		  DbTable* tb, /* [in out] */ 
 		  Eterm key, 
 		  Eterm* ret);
+    int (*db_get_and_erase)(Process* p,
+                            DbTable* tb,
+                            Eterm key,
+                            Eterm* ret);
     int (*db_get_element)(Process* p, 
 			  DbTable* tb, /* [in out] */ 
 			  Eterm key, 
