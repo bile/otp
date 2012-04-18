@@ -350,10 +350,14 @@ static BIF_RETTYPE ets_select_reverse(BIF_ALIST_3);
 /* Method interface functions */
 static int db_first_tree(Process *p, DbTable *tbl, 
 		  Eterm *ret);
+static int db_pop_first_tree(Process *p, DbTable *tbl,
+                             Eterm *ret);
 static int db_next_tree(Process *p, DbTable *tbl, 
 			Eterm key, Eterm *ret);
 static int db_last_tree(Process *p, DbTable *tbl, 
 			Eterm *ret);
+static int db_pop_last_tree(Process *p, DbTable *tbl,
+                             Eterm *ret);
 static int db_prev_tree(Process *p, DbTable *tbl, 
 			Eterm key,
 			Eterm *ret);
@@ -414,8 +418,10 @@ DbTableMethod db_tree =
 {
     db_create_tree,
     db_first_tree,
+    db_pop_first_tree,
     db_next_tree,
     db_last_tree,
+    db_pop_last_tree,
     db_prev_tree,
     db_put_tree,
     db_get_tree,
@@ -502,6 +508,54 @@ static int db_first_tree(Process *p, DbTable *tbl, Eterm *ret)
     return DB_ERROR_NONE;
 }
 
+static int db_pop_first_tree(Process *p, DbTable *tbl, Eterm *ret)
+{
+    DbTableTree *tb = &tbl->tree;
+    TreeDbTerm **tstack[STACK_NEED+1];
+    int tpos = 0;
+    int state = 0;
+    TreeDbTerm **this = &tb->root;
+    TreeDbTerm *q = NULL;
+
+    if (tb->root == NULL) {
+	*ret = am_EOT;
+	return DB_ERROR_NONE;
+    }
+
+    reset_static_stack(tb);
+    tstack[tpos++] = NULL;
+    while((*this)->left != NULL) {
+      tstack[tpos++] = this;
+      this = &((*this)->left);
+    }
+
+    q = (*this);
+    (*this) = q->right;
+    state = 1;
+
+    erts_smp_atomic_dec_nob(&tb->common.nitems);
+    
+    while (state && (this = tstack[--tpos])) {
+      state = balance_left(this);
+    }
+
+    {
+      Eterm *hp, *hend;
+      Eterm copy;
+
+      hp = HAlloc(p,q->dbterm.size+2);
+      hend = hp + q->dbterm.size+2;
+      copy = db_copy_object_from_ets(&tb->common,&q->dbterm,&hp,&MSO(p));
+      *ret = CONS(hp,copy,NIL);
+      hp += 2;
+      HRelease(p,hend,hp);
+    }
+    
+    free_term(tb,q);
+
+    return DB_ERROR_NONE;
+}
+
 static int db_next_tree(Process *p, DbTable *tbl, Eterm key, Eterm *ret)
 {
     DbTableTree *tb = &tbl->tree;
@@ -545,6 +599,54 @@ static int db_last_tree(Process *p, DbTable *tbl, Eterm *ret)
 	release_stack(tb,stack);
     }
     *ret = db_copy_key(p, tbl, &this->dbterm);
+    return DB_ERROR_NONE;
+}
+
+static int db_pop_last_tree(Process *p, DbTable *tbl, Eterm *ret)
+{
+    DbTableTree *tb = &tbl->tree;
+    TreeDbTerm **tstack[STACK_NEED+1];
+    int tpos = 0;
+    int state = 0;
+    TreeDbTerm **this = &tb->root;
+    TreeDbTerm *q = NULL;
+
+    if (tb->root == NULL) {
+	*ret = am_EOT;
+	return DB_ERROR_NONE;
+    }
+
+    reset_static_stack(tb);
+    tstack[tpos++] = NULL;
+    while((*this)->right != NULL) {
+      tstack[tpos++] = this;
+      this = &((*this)->right);
+    }
+
+    q = (*this);
+    (*this) = q->left;
+    state = 1;
+    
+    erts_smp_atomic_dec_nob(&tb->common.nitems);
+    
+    while (state && (this = tstack[--tpos])) {
+      state = balance_right(this);
+    }
+
+    {
+      Eterm *hp, *hend;
+      Eterm copy;
+
+      hp = HAlloc(p,q->dbterm.size+2);
+      hend = hp + q->dbterm.size+2;
+      copy = db_copy_object_from_ets(&tb->common,&q->dbterm,&hp,&MSO(p));
+      *ret = CONS(hp,copy,NIL);
+      hp += 2;
+      HRelease(p,hend,hp);
+    }
+    
+    free_term(tb,q);
+
     return DB_ERROR_NONE;
 }
 

@@ -375,6 +375,10 @@ static int db_first_hash(Process *p,
 			 DbTable *tbl, 
 			 Eterm *ret);
 
+static int db_pop_first_hash(Process *p, 
+                             DbTable *tbl, 
+                             Eterm *ret);
+
 static int db_next_hash(Process *p, 
 			DbTable *tbl, 
 			Eterm key,
@@ -501,8 +505,10 @@ DbTableMethod db_hash =
 {
     db_create_hash,
     db_first_hash,
+    db_pop_first_hash,
     db_next_hash,
     db_first_hash,   /* last == first  */
+    db_pop_first_hash, /* last == first */
     db_next_hash,    /* prev == next   */
     db_put_hash,
     db_get_hash,
@@ -716,6 +722,76 @@ static int db_first_hash(Process *p, DbTable *tbl, Eterm *ret)
     return DB_ERROR_NONE;
 }
 
+static int db_pop_first_hash(Process *p, DbTable *tbl, Eterm *ret)
+{
+    DbTableHash *tb = &tbl->hash;
+    Uint ix = 0;
+    erts_smp_rwmtx_t* lck = WLOCK_HASH(tb,ix);
+    HashDbTerm* list;
+
+    for (;;) {
+	list = BUCKET(tb,ix);
+	if (list != NULL) {
+	    if (list->hvalue == INVALID_HASH) {
+		list = next(tb,&ix,&lck,list);
+	    }
+	    break;
+	}
+	if ((ix=next_slot(tb,ix,&lck)) == 0) {
+	    list = NULL;
+	    break;
+	}
+    }
+
+    if (list != NULL) {
+      Eterm match_list = NIL;
+      int nitems_diff = 0;
+      Eterm key = GETKEY(tb,list->dbterm.tpl);
+      HashValue hval = list->hvalue;
+      HashDbTerm* b;
+      HashDbTerm** bp;
+
+      bp = &BUCKET(tb,ix);
+      b = *bp;
+      while(b != 0) {
+	if (has_live_key(tb,b,key,hval)) {
+          Eterm *hp = HAlloc(p,b->dbterm.size+2);
+          Eterm copy = db_copy_object_from_ets(&tb->common,
+                                               &b->dbterm,&hp,&MSO(p));
+          --nitems_diff;
+          match_list = CONS(hp,copy,match_list);
+          if (nitems_diff == -1 && IS_FIXED(tb)) {
+            /* Pseudo remove (no need to keep several of same key) */
+            add_fixed_deletion(tb, ix);
+            b->hvalue = INVALID_HASH;
+          } else {
+            *bp = b->next;
+            free_term(tb, b);
+            b = *bp;
+            continue;
+          }
+	}
+	else {
+          if (nitems_diff && list->hvalue != INVALID_HASH)
+            break;
+	}
+        bp = &b->next;
+	b = b->next;
+      }
+      WUNLOCK_HASH(lck);
+      if (nitems_diff) {
+	erts_smp_atomic_add_nob(&tb->common.nitems, nitems_diff);
+	try_shrink(tb);
+      }
+      
+      *ret = match_list;
+    }
+    else {
+      WUNLOCK_HASH(lck);
+      *ret = am_EOT;
+    }
+    return DB_ERROR_NONE;
+}
 
 static int db_next_hash(Process *p, DbTable *tbl, Eterm key, Eterm *ret)
 {

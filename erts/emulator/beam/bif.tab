@@ -526,6 +526,8 @@ bif ets:delete_object/2
 bif 'erl.lang.ets':delete_object/2	ebif_ets_delete_object_2
 bif ets:first/1
 bif 'erl.lang.ets':first/1		ebif_ets_first_1
+bif ets:pop_first/1
+bif 'erl.lang.ets':pop_first/1		ebif_ets_pop_first_1
 bif ets:is_compiled_ms/1
 bif 'erl.lang.ets':is_compiled_ms/1	ebif_ets_is_compiled_ms_1
 bif ets:lookup/2
@@ -538,6 +540,8 @@ bif ets:info/2
 bif 'erl.lang.ets':info/2		ebif_ets_info_2
 bif ets:last/1
 bif 'erl.lang.ets':last/1		ebif_ets_last_1
+bif ets:pop_last/1
+bif 'erl.lang.ets':pop_last/1		ebif_ets_pop_last_1
 bif ets:match/1
 bif 'erl.lang.ets':match/1		ebif_ets_match_1
 bif ets:match/2

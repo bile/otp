@@ -690,6 +690,33 @@ BIF_RETTYPE ets_first_1(BIF_ALIST_1)
 }
 
 /* 
+** Returns the first Object in a table and removes it
+*/
+BIF_RETTYPE ets_pop_first_1(BIF_ALIST_1)
+{
+    DbTable* tb;
+    int cret;
+    Eterm ret;
+
+    CHECK_TABLES();
+
+    tb = db_get_table(BIF_P, BIF_ARG_1, DB_READ, LCK_READ);
+
+    if (!tb) {
+	BIF_ERROR(BIF_P, BADARG);
+    }
+
+    cret = tb->common.meth->db_pop_first(BIF_P, tb, &ret);
+
+    db_unlock(tb, LCK_READ);
+
+    if (cret != DB_ERROR_NONE) {
+	BIF_ERROR(BIF_P, BADARG);
+    }
+    BIF_RET(ret);
+}
+
+/* 
 ** The next BIF, given a key, return the "next" key 
 */
 BIF_RETTYPE ets_next_2(BIF_ALIST_2)
@@ -736,6 +763,33 @@ BIF_RETTYPE ets_last_1(BIF_ALIST_1)
     cret = tb->common.meth->db_last(BIF_P, tb, &ret);
 
     db_unlock(tb, LCK_READ);
+
+    if (cret != DB_ERROR_NONE) {
+	BIF_ERROR(BIF_P, BADARG);
+    }
+    BIF_RET(ret);
+}
+
+/* 
+** Returns the last Object in a table and removes it
+*/
+BIF_RETTYPE ets_pop_last_1(BIF_ALIST_1)
+{
+    DbTable* tb;
+    int cret;
+    Eterm ret;
+
+    CHECK_TABLES();
+
+    tb = db_get_table(BIF_P, BIF_ARG_1, DB_WRITE, LCK_WRITE_REC);
+
+    if (!tb) {
+	BIF_ERROR(BIF_P, BADARG);
+    }
+
+    cret = tb->common.meth->db_pop_last(BIF_P, tb, &ret);
+
+    db_unlock(tb, LCK_WRITE_REC);
 
     if (cret != DB_ERROR_NONE) {
 	BIF_ERROR(BIF_P, BADARG);

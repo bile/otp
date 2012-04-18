@@ -98,6 +98,9 @@ typedef struct db_table_method
     int (*db_first)(Process* p, 
 		    DbTable* tb, /* [in out] */ 
 		    Eterm* ret   /* [out] */);
+    int (*db_pop_first)(Process* p, 
+                        DbTable* tb, /* [in out] */ 
+                        Eterm* ret   /* [out] */);
     int (*db_next)(Process* p, 
 		   DbTable* tb, /* [in out] */
 		   Eterm key,   /* [in] */
@@ -105,6 +108,9 @@ typedef struct db_table_method
     int (*db_last)(Process* p, 
 		   DbTable* tb, /* [in out] */
 		   Eterm* ret   /* [out] */);
+    int (*db_pop_last)(Process* p, 
+                       DbTable* tb, /* [in out] */ 
+                       Eterm* ret   /* [out] */);
     int (*db_prev)(Process* p, 
 		   DbTable* tb, /* [in out] */
 		   Eterm key, 
