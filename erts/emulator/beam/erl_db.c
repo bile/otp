@@ -1281,6 +1281,71 @@ BIF_RETTYPE ets_rename_2(BIF_ALIST_2)
     BIF_ERROR(BIF_P, BADARG);    
 }
 
+BIF_RETTYPE ets_swap_2(BIF_ALIST_2)
+{
+  DbTable *tbA, *tbB;
+  erts_smp_rwmtx_t *lockA, *lockB;
+
+  if (!is_atom(BIF_ARG_1) || !is_atom(BIF_ARG_2))
+    BIF_ERROR(BIF_P,BADARG);
+
+  meta_name_tab_bucket(BIF_ARG_1,&lockA);
+  meta_name_tab_bucket(BIF_ARG_2,&lockB);
+
+  if (lockA == lockB)
+    {
+      lockB = NULL;
+    }
+  else if (lockA > lockB)
+    {
+      erts_smp_rwmtx_t *tmp = lockA;
+      lockA = lockB;
+      lockB = tmp;
+    }
+
+  erts_smp_rwmtx_rwlock(lockA);
+  if (lockB)
+    erts_smp_rwmtx_rwlock(lockB);
+  
+  tbA = db_get_table_aux(BIF_P,BIF_ARG_1,DB_WRITE,LCK_WRITE,1);
+  if (!tbA)
+    goto badarg;
+
+  tbB = db_get_table_aux(BIF_P,BIF_ARG_2,DB_WRITE,LCK_WRITE,1);
+  if (!tbB)
+    goto badarg;
+
+  remove_named_tab(tbA,1);
+  remove_named_tab(tbB,1);
+
+  {
+    Eterm tmp;
+    tmp = tbA->common.id;
+    tbA->common.id = tbA->common.the_name = tbB->common.id;
+    tbB->common.id = tbB->common.the_name = tmp;
+  }
+
+  insert_named_tab(tbA->common.id,tbA,1);
+  insert_named_tab(tbB->common.id,tbB,1);  
+  
+  db_unlock(tbA,LCK_WRITE);
+  db_unlock(tbB,LCK_WRITE);
+  erts_smp_rwmtx_rwunlock(lockA);
+  if (lockB)
+    erts_smp_rwmtx_rwunlock(lockB);
+  BIF_RET(am_ok);
+  
+ badarg:
+  if (tbA)
+    db_unlock(tbA,LCK_WRITE);
+  if (tbB)
+    db_unlock(tbB,LCK_WRITE);
+  erts_smp_rwmtx_rwunlock(lockA);
+  if (lockB)
+    erts_smp_rwmtx_rwunlock(lockB);
+  BIF_ERROR(BIF_P,BADARG);
+}
+
 
 /* 
 ** The create table BIF     
