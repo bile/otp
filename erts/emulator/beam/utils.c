@@ -3039,6 +3039,17 @@ int io_list_to_buf(Eterm obj, char* buf, int len)
 		}
 		*buf++ = unsigned_val(obj);
 		len--;
+            } else if (is_atom(obj)) {
+                Atom* ap;
+
+                ap = atom_tab(atom_val(obj));
+                if (len < ap->len) {
+                  goto L_overflow;
+                }
+
+                copy_binary_to_buffer(buf, 0, ap->name, 0, ap->len*8);
+                buf += ap->len;
+                len -= ap->len;
 	    } else if (is_binary(obj)) {
 		byte* bptr;
 		size_t size = binary_size(obj);
@@ -3084,11 +3095,22 @@ int io_list_to_buf(Eterm obj, char* buf, int len)
 		copy_binary_to_buffer(buf, 0, bptr, bitoffs, num_bits);
 		buf += size;
 		len -= size;
+            } else if (is_atom(obj)) {
+                Atom* ap;
+
+                ap = atom_tab(atom_val(obj));
+                if (len < ap->len) {
+                    goto L_overflow;
+                }
+
+                copy_binary_to_buffer(buf, 0, ap->name, 0, ap->len*8);
+                buf += ap->len;
+                len -= ap->len;
 	    } else if (is_not_nil(obj)) {
 		goto L_type_error;
 	    }
 	} else if (is_binary(obj)) {
-	    byte* bptr;
+            byte* bptr;
 	    size_t size = binary_size(obj);
 	    Uint bitsize;
 	    Uint bitoffs;
@@ -3104,6 +3126,17 @@ int io_list_to_buf(Eterm obj, char* buf, int len)
 	    copy_binary_to_buffer(buf, 0, bptr, bitoffs, num_bits);
 	    buf += size;
 	    len -= size;
+        } else if (is_atom(obj)) {
+            Atom* ap;
+
+            ap = atom_tab(atom_val(obj));
+            if (len < ap->len) {
+                goto L_overflow;
+            }
+
+            copy_binary_to_buffer(buf, 0, ap->name, 0, ap->len*8);
+            buf += ap->len;
+            len -= ap->len;
 	} else if (is_not_nil(obj)) {
 	    goto L_type_error;
 	}
@@ -3155,6 +3188,9 @@ int erts_iolist_size(Eterm obj, Uint* sizep)
 		}
 	    } else if (is_binary(obj) && binary_bitsize(obj) == 0) {
 		SAFE_ADD(size, binary_size(obj));
+            } else if (is_atom(obj)) {
+              Atom* ap = atom_tab(atom_val(obj));
+              SAFE_ADD(size,ap->len);
 	    } else if (is_list(obj)) {
 		ESTACK_PUSH(s, CDR(objp));
 		goto L_iter_list; /* on head */
@@ -3167,13 +3203,20 @@ int erts_iolist_size(Eterm obj, Uint* sizep)
 		goto L_iter_list; /* on tail */
 	    else if (is_binary(obj) && binary_bitsize(obj) == 0) {
 		SAFE_ADD(size, binary_size(obj));
+            } else if (is_atom(obj)) {
+              Atom* ap = atom_tab(atom_val(obj));
+              SAFE_ADD(size,ap->len);
 	    } else if (is_not_nil(obj)) {
 		goto L_type_error;
 	    }
 	} else if (is_binary(obj) && binary_bitsize(obj) == 0) { /* Tail was binary */
 	    SAFE_ADD(size, binary_size(obj));
-	} else if (is_not_nil(obj)) {
-	    goto L_type_error;
+
+        } else if (is_atom(obj)) {
+            Atom* ap = atom_tab(atom_val(obj));
+            SAFE_ADD(size,ap->len);
+        } else if (is_not_nil(obj)) {
+            goto L_type_error;
 	}
     }
 #undef SAFE_ADD
