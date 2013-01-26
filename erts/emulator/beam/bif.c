@@ -2332,6 +2332,9 @@ BIF_RETTYPE iolist_size_1(BIF_ALIST_1)
 		ESTACK_PUSH(s, obj);
 		obj = hd;
 		goto L_iter_list;
+            } else if (is_atom(hd)) {
+                Atom *ap = atom_tab(atom_val(hd));
+                size += ap->len;
 	    } else if (is_not_nil(hd)) {
 		goto L_type_error;
 	    }
@@ -2346,7 +2349,11 @@ BIF_RETTYPE iolist_size_1(BIF_ALIST_1)
 		    acc = accumulate(acc, size);
 		    size = cur_size;
 		}
-	    } else if (is_not_nil(obj)) {
+            } else if (is_atom(obj)) {
+                Atom *ap = atom_tab(atom_val(obj));
+                size += ap->len;
+            }
+	    else if (is_not_nil(obj)) {
 		goto L_type_error;
 	    }
 	} else if (is_binary(obj) && binary_bitsize(obj) == 0) {
@@ -2357,6 +2364,9 @@ BIF_RETTYPE iolist_size_1(BIF_ALIST_1)
 		acc = accumulate(acc, size);
 		size = cur_size;
 	    }
+        } else if (is_atom(obj)) {
+            Atom *ap = atom_tab(atom_val(obj));
+            size += ap->len;
 	} else if (is_not_nil(obj)) {
 	    goto L_type_error;
 	}
